@@ -1,0 +1,19 @@
+[package]
+name = "opendal-foyer"
+description = "foyer layer for opendal"
+version = "0.1.0"
+homepage = "https://github.com/r3v2d0g/opendal-foyer"
+documentation = "https://docs.rs/opendal-foyer"
+license = "MPL-2.0"
+authors = ["Matthieu (MLB) Le brazidec <r3v2d0g@jesus.gg>"]
+edition = "2024"
+
+[dependencies]
+foyer = { version = "0.20", features = ["serde"] }
+futures = "0.3"
+opendal = "0.54"
+serde = { version = "1.0", features = ["derive", "rc"] }
+scc = "3.4"
+
+[dev-dependencies]
+tokio = { version = "1.48", features = ["full"] }
