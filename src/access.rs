@@ -1,4 +1,4 @@
-use std::{fmt::Debug, hash::BuildHasher, ops::Range, sync::Arc};
+use std::{cmp, fmt::Debug, hash::BuildHasher, sync::Arc};
 
 use foyer::{DefaultHasher, HybridCache};
 use futures::prelude::*;
@@ -10,6 +10,8 @@ use opendal::{
     },
 };
 use scc::HashMap;
+
+use crate::access::reader::ReadBlock;
 
 pub(crate) use self::block::{Block, Key};
 use self::reader::Reader;
@@ -103,8 +105,8 @@ where
     /// Returns the list of [`Key`] of the blocks to fetch for the given path and range.
     ///
     /// Depending on the `block_size` value and the provided `range`, this computes the
-    /// blocks that have to be fetched, and the range of bytes to read within each block.
-    async fn blocks(&self, path: &str, range: BytesRange) -> Result<Vec<(Range<usize>, Key)>> {
+    /// blocks that have to be fetched.
+    async fn blocks(&self, path: &str, range: BytesRange) -> Result<Vec<ReadBlock>> {
         let info = self.inner.info();
 
         let backend = info.name();
@@ -112,17 +114,18 @@ where
         let path = Arc::from(path);
 
         let offset = range.offset() as usize;
-        let size = if let Some(size) = range.size() {
-            size as usize
-        } else {
-            let path = Arc::clone(&path);
-            let metadata = self.metadata(path).await?;
-            let size = metadata.content_length() as usize;
-            if size <= offset {
-                return Ok(vec![]);
-            }
 
-            size - offset
+        let metadata = self.metadata(Arc::clone(&path)).await?;
+        let file_size = metadata.content_length() as usize;
+
+        if offset >= file_size {
+            return Ok(vec![]);
+        }
+
+        let size = if let Some(size) = range.size() {
+            cmp::min(size as usize, file_size - offset)
+        } else {
+            file_size - offset
         };
 
         let mut num_blocks = size / self.block_size;
@@ -145,18 +148,28 @@ where
         let mut index = (offset / self.block_size) as u16;
 
         while remaining > 0 {
-            // If this is the first block, we skip the first `offset` bytes.
+            // If this is the first block to read, we skip the first `offset` bytes.
             let start = if remaining == size {
                 offset - index as usize * self.block_size
             } else {
                 0
             };
 
-            // If this is the last block, we only take the `remaining` bytes.
-            let end = if remaining <= (self.block_size - start) {
-                start + remaining
+            // If this is the last block to read, we only take the `remaining` bytes.
+            let (end, size) = if remaining <= (self.block_size - start) {
+                let end = start + remaining;
+
+                // If this is the last in the file, we make sure not to try to read past
+                // `file_size`.
+                let size = if size + self.block_size > file_size {
+                    file_size - index as usize * self.block_size
+                } else {
+                    self.block_size
+                };
+
+                (end, size)
             } else {
-                self.block_size
+                (self.block_size, self.block_size)
             };
 
             let range = start..end;
@@ -167,7 +180,7 @@ where
                 index,
             };
 
-            blocks.push((range, key));
+            blocks.push(ReadBlock { key, range, size });
 
             remaining = remaining.saturating_sub(end - start);
             index += 1;

@@ -69,4 +69,29 @@ async fn it_works() {
         .expect("failed to read back")
         .to_vec();
     assert_eq!(read, vec![5]);
+
+    // Trying to read past the end of the file
+    let read = operator
+        .read_with("bar")
+        .range(5..10)
+        .await
+        .expect("failed to read back")
+        .to_vec();
+    assert_eq!(read, vec![5, 6]);
+
+    let read = operator
+        .read_with("bar")
+        .range(..10)
+        .await
+        .expect("failed to read back")
+        .to_vec();
+    assert_eq!(read, vec![0, 1, 2, 3, 4, 5, 6]);
+
+    let read = operator
+        .read_with("bar")
+        .range(10..)
+        .await
+        .expect("failed to read back")
+        .to_vec();
+    assert!(read.is_empty());
 }

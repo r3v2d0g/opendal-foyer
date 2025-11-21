@@ -31,11 +31,25 @@ where
     /// The hybrid cache used to cache reads to the underlying storage.
     cache: HybridCache<Key, Block, S>,
 
-    /// The blocks to read, as well as the range of bytes to include within each block.
-    blocks: Vec<(Range<usize>, Key)>,
+    /// The blocks to read.
+    blocks: Vec<ReadBlock>,
 
     /// The index of the next block to read within `blocks`.
     next: usize,
+}
+
+/// A block to read as part of a [`Reader`].
+#[derive(Clone, Debug)]
+pub(super) struct ReadBlock {
+    /// The key for the block, used to fetch it from the cache, or to put it into the
+    /// cache.
+    pub key: Key,
+
+    /// The range of bytes to read within the block.
+    pub range: Range<usize>,
+
+    /// The size of the block, if it needs to be fetched from the storage backend.
+    pub size: usize,
 }
 
 impl<A: Access, S> Reader<A, S>
@@ -46,7 +60,7 @@ where
         inner: Arc<A>,
         block_size: usize,
         cache: HybridCache<Key, Block, S>,
-        blocks: Vec<(Range<usize>, Key)>,
+        blocks: Vec<ReadBlock>,
     ) -> Self {
         Self {
             inner,
@@ -69,7 +83,7 @@ where
 
         self.next = current + 1;
 
-        let (range, key) = self.blocks[current].clone();
+        let ReadBlock { key, range, size } = self.blocks[current].clone();
         if let Some(block) = self
             .cache
             .obtain(key.clone())
@@ -80,9 +94,18 @@ where
             return Ok(buffer);
         }
 
+        let buffer = self.read(key, size).await?;
+        let buffer = buffer.slice(range);
+
+        Ok(buffer)
+    }
+
+    /// Reads the block with the given key from the storage backend, of the given size.
+    ///
+    /// This puts the block into the cache after reading it.
+    async fn read(&mut self, key: Key, size: usize) -> Result<Buffer> {
         let path = key.path.as_ref();
-        let offset = self.block_size * key.index as usize + range.start;
-        let size = range.end - range.start;
+        let offset = self.block_size * key.index as usize;
         let range = BytesRange::new(offset as u64, Some(size as u64));
         let args = OpRead::new().with_range(range);
 

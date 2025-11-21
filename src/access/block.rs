@@ -8,7 +8,7 @@ use opendal::Buffer;
 use serde::{Deserialize, Serialize};
 
 /// The key of a block stored in [`foyer`]'s hybrid cache.
-#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Key {
     /// The name of the backend (e.g. the bucket name if using S3).
     ///
