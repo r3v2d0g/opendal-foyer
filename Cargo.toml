@@ -1,7 +1,7 @@
 [package]
 name = "opendal-foyer"
 description = "foyer layer for opendal"
-version = "0.1.0"
+version = "0.1.1"
 homepage = "https://github.com/r3v2d0g/opendal-foyer"
 documentation = "https://docs.rs/opendal-foyer"
 license = "MPL-2.0"
