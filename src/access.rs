@@ -161,11 +161,8 @@ where
 
                 // If this is the last in the file, we make sure not to try to read past
                 // `file_size`.
-                let size = if size + self.block_size > file_size {
-                    file_size - index as usize * self.block_size
-                } else {
-                    self.block_size
-                };
+                let block_end = index as usize * self.block_size;
+                let size = cmp::min(self.block_size, file_size - block_end);
 
                 (end, size)
             } else {
