@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use foyer::{Code, CodeResult};
+use foyer::{Code, Result};
 use opendal::Buffer;
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +43,7 @@ pub struct Block {
 
 impl Code for Block {
     #[inline]
-    fn encode(&self, writer: &mut impl Write) -> CodeResult<()> {
+    fn encode(&self, writer: &mut impl Write) -> Result<()> {
         self.data.len().encode(writer)?;
 
         // `self.data` is cheap to clone – we are iterating over the non-continuous slices
@@ -57,7 +57,7 @@ impl Code for Block {
     }
 
     #[inline]
-    fn decode(reader: &mut impl Read) -> CodeResult<Self>
+    fn decode(reader: &mut impl Read) -> Result<Self>
     where
         Self: Sized,
     {

@@ -1,6 +1,7 @@
 use std::{fmt::Debug, hash::BuildHasher, ops::Range, sync::Arc};
 
 use foyer::{DefaultHasher, HybridCache};
+use futures::prelude::*;
 use opendal::{
     Buffer, Error, ErrorKind, Result,
     raw::{Access, BytesRange, MaybeSend, OpRead, oio::Read},
@@ -18,15 +19,8 @@ pub struct Reader<A, S = DefaultHasher>
 where
     S: BuildHasher + Debug + Send + Sync + 'static,
 {
-    /// The underlying storage whose reads are being cached.
-    inner: Arc<A>,
-
-    /// The size of the blocks cached within [`foyer`]'s hybrid cache.
-    ///
-    /// There can only be up to [`u16::MAX`] blocks for each file.
-    ///
-    /// Changing this value requires creating a new empty cache.
-    block_size: usize,
+    /// The backend storage used to read blocks.
+    backend: Backend<A>,
 
     /// The hybrid cache used to cache reads to the underlying storage.
     cache: HybridCache<Key, Block, S>,
@@ -36,6 +30,19 @@ where
 
     /// The index of the next block to read within `blocks`.
     next: usize,
+}
+
+/// The backend storage of a [`Reader`].
+struct Backend<A> {
+    /// The underlying storage whose reads are being cached.
+    inner: Arc<A>,
+
+    /// The size of the blocks cached within [`foyer`]'s hybrid cache.
+    ///
+    /// There can only be up to [`u16::MAX`] blocks for each file.
+    ///
+    /// Changing this value requires creating a new empty cache.
+    block_size: usize,
 }
 
 /// A block to read as part of a [`Reader`].
@@ -62,9 +69,10 @@ where
         cache: HybridCache<Key, Block, S>,
         blocks: Vec<ReadBlock>,
     ) -> Self {
+        let backend = Backend { inner, block_size };
+
         Self {
-            inner,
-            block_size,
+            backend,
             cache,
             blocks,
             next: 0,
@@ -84,41 +92,39 @@ where
         self.next = current + 1;
 
         let ReadBlock { key, range, size } = self.blocks[current].clone();
-        if let Some(block) = self
+        let block = self
             .cache
-            .obtain(key.clone())
-            .await
-            .map_err(|error| Error::new(ErrorKind::Unexpected, error.to_string()))?
-        {
-            let buffer = block.data.slice(range);
-            return Ok(buffer);
-        }
+            .get_or_fetch(&key.clone(), || {
+                self.backend
+                    .clone()
+                    .read(key, size)
+                    .map_err(|error| foyer::Error::io_error(error.into()))
+            })
+            .map_err(|error| Error::new(ErrorKind::Unexpected, error.to_string()))
+            .await?;
 
-        let buffer = self.read(key, size).await?;
-        let buffer = buffer.slice(range);
-
+        let buffer = block.data.slice(range);
         Ok(buffer)
     }
+}
 
-    /// Reads the block with the given key from the storage backend, of the given size.
+impl<A: Access> Backend<A> {
+    /// Reads the block with the given key from the storage backend.
     ///
-    /// This puts the block into the cache after reading it.
-    async fn read(&mut self, key: Key, size: usize) -> Result<Buffer> {
+    /// This does not take a reference to make it easy to read from within a call to
+    /// [`get_or_fetch()`][1].
+    ///
+    /// [1]: HybridCache::get_or_fetch()
+    async fn read(self, key: Key, size: usize) -> Result<Block> {
         let path = key.path.as_ref();
         let offset = self.block_size * key.index as usize;
         let range = BytesRange::new(offset as u64, Some(size as u64));
         let args = OpRead::new().with_range(range);
 
         let (_, mut reader) = self.inner.read(path, args).await?;
-        let buffer = reader.read_all().await?;
+        let data = reader.read_all().await?;
 
-        let block = Block {
-            data: buffer.clone(),
-        };
-
-        self.cache.insert(key, block);
-
-        Ok(buffer)
+        Ok(Block { data })
     }
 }
 
@@ -128,5 +134,14 @@ where
 {
     fn read(&mut self) -> impl Future<Output = Result<Buffer>> + MaybeSend {
         self.next()
+    }
+}
+
+impl<A> Clone for Backend<A> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            block_size: self.block_size,
+        }
     }
 }
