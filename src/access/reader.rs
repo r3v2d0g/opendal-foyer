@@ -95,6 +95,8 @@ where
         let block = self
             .cache
             .get_or_fetch(&key.clone(), || {
+                tracing::debug!(size, "Cache miss for block (size = {size}): {:?}", key);
+
                 self.backend
                     .clone()
                     .read(key, size)

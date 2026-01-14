@@ -1220,6 +1220,7 @@ dependencies = [
  "scc",
  "serde",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

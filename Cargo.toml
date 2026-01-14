@@ -14,6 +14,7 @@ futures = "0.3"
 opendal = "0.54"
 serde = { version = "1.0", features = ["derive", "rc"] }
 scc = "3.4"
+tracing = "0.1"
 
 [dev-dependencies]
 tokio = { version = "1.48", features = ["full"] }
